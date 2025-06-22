@@ -23,8 +23,8 @@ public:
             for (int i = 0; i < counter; i++) {
                 file << contents[i];
                 file << "\n";
-                file.close();
             }
+            file.close();
         }
         counter = 0;
     }
