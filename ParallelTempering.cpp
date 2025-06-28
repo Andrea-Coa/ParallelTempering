@@ -8,7 +8,7 @@
 using namespace std;
 
 // Parámetros
-constexpr int n_steps = 1000000;
+constexpr int n_steps = 100000;
 constexpr double T1 = 1.0;
 constexpr double TM  = 4.0;
 constexpr int period = 1000;
@@ -23,8 +23,10 @@ double calculateConfigEnergy(int config [L][L], double J[L*L][L*L]);
 void printConfig(int config[L][L]);
 // Definir el tipo de mensaje que se manda entre procesos
 MPI_Datatype createMessageType();
-// Calcular la temperatura que le corresponde al proceso con identificador rank
+// Calcular la temperatura GEOMÉTRICAMENTE que le corresponde al proceso con identificador rank
 double calculateTemperatureWithGeometricSpacing (const int rank, const int size);
+// Calcular la temperatura UNIFORMEMENTE que le corresponde al proceso con identificador rank
+double calculateTemperatureWithUniformSpacing (const int rank, const int size);
 // Generar la configuración inicial de los spins
 void generateInitialConfiguration(mt19937 &gen, uniform_real_distribution<double> &dist, int config[L][L]);
 // Generar interacciones Jij de una muestra Gaussiana (0, 1), sólo para spins adyacentes
@@ -34,6 +36,7 @@ void generateGaussianInteractions(
     double J[L*L][L*L],
     bool display
 );
+void computeAcceptanceRates(int * global_acceptances, const int &size);
 
 
 // Mensaje que se pasa de proceso a proceso
@@ -80,6 +83,11 @@ int main(int argc, char **argv) {
     Buffer buf(filename, 1000);
     MPI_Datatype msg_type = createMessageType();
     int swap = 0;
+    int acceptances[] = {0, 0};
+    int *global_acceptances = nullptr;
+    if (rank == 0) {
+        global_acceptances = new int[2*size];
+    }
 
     // Generate initial config and J_ij interactions and broadcast it to other processes
     if (rank == 0) {
@@ -111,6 +119,7 @@ int main(int argc, char **argv) {
             }
 
             if (peer != MPI_PROC_NULL) {
+                // printf("Entered exchange\n");
                 Message msgTo(config, prev_energy, Ti);
                 Message msgFrom;
 
@@ -121,14 +130,21 @@ int main(int argc, char **argv) {
                 double Tj = msgFrom.temperature;
                 double delta = (1.0 / Ti - 1.0 / Tj) * (msgFrom.energy - prev_energy);
 
+
                 double u = uniform_continuous(gen);
                 if (delta < 0.0 || u < exp(-delta)) {
+                    if (rank % 2 == 0) {
+                        if (swap % 2 == 0) acceptances[1] += 1;
+                        else acceptances[0] += 1;
+                    }
+                    // Ver si aceptó (sólo los pares corroboran):
                     for (int i = 0; i < L; ++i)
                         for (int j = 0; j < L; ++j)
                             config[i][j] = msgFrom.config[i][j];
                     prev_energy = msgFrom.energy;
                 }
             }
+            tag++;
             swap++;
             buf.add(prev_energy);
             continue;
@@ -156,11 +172,29 @@ int main(int argc, char **argv) {
         buf.add(prev_energy);    
         
     }
-    MPI_Type_free(&msg_type);
     MPI_Barrier(MPI_COMM_WORLD);
+    MPI_Gather(acceptances, 2, MPI_INT, global_acceptances, 2, MPI_INT, 0, MPI_COMM_WORLD);
+    if (rank == 0) {
+        computeAcceptanceRates(global_acceptances, size);
+    }
+    if (rank == 0) {delete [] global_acceptances;}
+
+    MPI_Type_free(&msg_type);
     MPI_Finalize();
     return 0;
 
+}
+
+void computeAcceptanceRates(int * global_acceptances, const int &size) {
+    printf("----------------- ACCEPTANCE RATES BY PAIRS -----------------\n");
+    for (int i = 0; i < size / 2; i++ ) {
+        double rate1 = double(global_acceptances[4*i]) / double(n_steps / (2 * period));
+        double rate2 = double(global_acceptances[4*i+1]) / double(n_steps / (2 * period));
+
+        printf("Pair (%i, %i): %.4f acceptance probability.\n", 2*i-1, 2*i, rate1);
+        printf("Pair (%i, %i): %.4f acceptance probability.\n", 2*i, 2*i+1, rate2);
+    }
+    printf("-------------------------------------------------------------\n");
 }
 
 
@@ -212,6 +246,12 @@ double calculateTemperatureWithGeometricSpacing (const int rank, const int size)
     if (rank == size-1) return TM;
     return T1 * pow(TM / T1, double(rank) / double(size - 1));
 }
+
+double calculateTemperatureWithUniformSpacing (const int rank, const int size) {
+    double diff = (TM - T1) / double (size - 1);
+    return T1 + diff * rank;
+}
+
 
 void generateInitialConfiguration(mt19937 &gen, uniform_real_distribution<double> &dist, int config[L][L]) {
     for (int i = 0; i < L; i++) {
