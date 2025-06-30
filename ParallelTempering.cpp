@@ -12,7 +12,7 @@ constexpr int n_steps = 100000;
 constexpr double T1 = 1.0;
 constexpr double TM  = 4.0;
 constexpr int period = 1000;
-constexpr int L = 3;
+constexpr int L = 10;
 constexpr double kB = 1.0;
 
 // Funciones
@@ -42,8 +42,9 @@ void computeAcceptanceRates(int * global_acceptances, const int &size);
 // Mensaje que se pasa de proceso a proceso
 struct Message {
     int config[L][L];
-    double energy; // energy
+    double energy;
     double temperature;
+
     Message() = default;
     Message(int config_[L][L], double energy_, double temperature_) {
         energy = energy_;
@@ -55,6 +56,20 @@ struct Message {
         }
     }
 };
+
+int calculatePeer(const int &swap, const int &size, const int&rank) {
+    int peer = MPI_PROC_NULL;
+
+    // El emparejamiento cambia
+    if (swap % 2 == 0) {
+        if (rank % 2 == 0 && rank + 1 < size) peer = rank + 1;
+        else if (rank % 2 == 1) peer = rank - 1;
+    } else {
+        if (rank % 2 == 0 && rank - 1 >= 0) peer = rank - 1;
+        else if (rank % 2 == 1 && rank + 1 < size) peer = rank + 1;
+    }
+    return peer;
+}
 
 
 int main(int argc, char **argv) {
@@ -107,16 +122,7 @@ int main(int argc, char **argv) {
     for (int step = 0; step < n_steps; step++) {
         // Intercambio con otro proceso
         if (step % period == 0) {
-            int peer = MPI_PROC_NULL;
-
-            // El emparejamiento cambia
-            if (swap % 2 == 0) {
-                if (rank % 2 == 0 && rank + 1 < size) peer = rank + 1;
-                else if (rank % 2 == 1) peer = rank - 1;
-            } else {
-                if (rank % 2 == 0 && rank - 1 >= 0) peer = rank - 1;
-                else if (rank % 2 == 1 && rank + 1 < size) peer = rank + 1;
-            }
+            int peer = calculatePeer(swap, size, rank);
 
             if (peer != MPI_PROC_NULL) {
                 // printf("Entered exchange\n");
@@ -133,11 +139,12 @@ int main(int argc, char **argv) {
 
                 double u = uniform_continuous(gen);
                 if (delta < 0.0 || u < exp(-delta)) {
+                    // Ver si aceptó (sólo los pares corroboran):
                     if (rank % 2 == 0) {
                         if (swap % 2 == 0) acceptances[1] += 1;
                         else acceptances[0] += 1;
                     }
-                    // Ver si aceptó (sólo los pares corroboran):
+                    // Intercambio
                     for (int i = 0; i < L; ++i)
                         for (int j = 0; j < L; ++j)
                             config[i][j] = msgFrom.config[i][j];
@@ -172,12 +179,14 @@ int main(int argc, char **argv) {
         buf.add(prev_energy);    
         
     }
+
+    // Calcular probabilidad de aceptar un swap
     MPI_Barrier(MPI_COMM_WORLD);
     MPI_Gather(acceptances, 2, MPI_INT, global_acceptances, 2, MPI_INT, 0, MPI_COMM_WORLD);
     if (rank == 0) {
         computeAcceptanceRates(global_acceptances, size);
+        delete [] global_acceptances;
     }
-    if (rank == 0) {delete [] global_acceptances;}
 
     MPI_Type_free(&msg_type);
     MPI_Finalize();
