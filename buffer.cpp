@@ -5,7 +5,8 @@ using namespace std;
 class Buffer {
     string filename = "";
     int max_size;
-    double *contents = nullptr;
+    double *energies = nullptr;
+    double *magnetizations = nullptr;
     int counter;
 
 public:
@@ -13,7 +14,8 @@ public:
         counter = 0;
         filename = filename_;
         max_size = max_size_;
-        contents = new double[max_size];
+        energies = new double[max_size];
+        magnetizations = new double[max_size];
     }
 
     void writeToFile() {
@@ -21,25 +23,36 @@ public:
         file.open(filename, ios::app);
         if (file.is_open()) {
             for (int i = 0; i < counter; i++) {
-                file << contents[i];
+                file << energies[i] << " " << magnetizations[i];
                 file << "\n";
             }
             file.close();
         }
         counter = 0;
     }
+    void setTemperature(double temperature) {
+        ofstream file;
+        file.open(filename, ios::app);
+        if (file.is_open()) {
+            file << temperature;
+            file << "\n";
+            file.close();
+        }
+    }
 
-    void add(double val) {
+    void add(double energy, double magnetization) {
         if (counter == max_size) {
             writeToFile();
         }
-        contents[counter]  = val;
-        counter ++;
+        energies[counter]  = energy;
+        magnetizations[counter] = magnetization;
+        counter++;
     }
 
     ~Buffer() {
         if (counter > 0)
             writeToFile();
-        delete [] contents;
+        delete [] energies;
+        delete [] magnetizations;
     }
 };

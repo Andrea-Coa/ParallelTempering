@@ -8,17 +8,17 @@
 using namespace std;
 
 // Parámetros
-constexpr int n_steps = 100000;
+constexpr int n_steps = 1000000;
 constexpr double T1 = 1.0;
 constexpr double TM  = 4.0;
 constexpr int period = 1000;
-constexpr int L = 10;
+constexpr int L = 5;
 constexpr double kB = 1.0;
 
 // Funciones
 
-// Calcular energía de una configuración
-double calculateConfigEnergy(int config [L][L], double J[L*L][L*L]);
+// Calcular los observables energía y magnetización
+pair<double, double> calculateObservables(int config [L][L], double J[L*L][L*L]);
 // Imprimir configuración de tamaño L x L
 void printConfig(int config[L][L]);
 // Definir el tipo de mensaje que se manda entre procesos
@@ -44,11 +44,13 @@ struct Message {
     int config[L][L];
     double energy;
     double temperature;
+    double magnetization;
 
     Message() = default;
-    Message(int config_[L][L], double energy_, double temperature_) {
+    Message(int config_[L][L], double energy_, double temperature_, double magnetization_) {
         energy = energy_;
         temperature = temperature_;
+        magnetization = magnetization_;
         for (int i = 0; i < L; i++) {
             for (int j = 0; j < L; j++) {
                 config[i][j] = config_[i][j];
@@ -114,9 +116,11 @@ int main(int argc, char **argv) {
     MPI_Bcast(config, L*L, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(J, L*L*L*L, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    double prev_energy = calculateConfigEnergy(config, J);
-    buf.add(Ti);
-    buf.add(prev_energy);
+    auto observables = calculateObservables(config, J);
+    double prev_energy = observables.first;
+    double prev_magnetization = observables.second;
+    buf.setTemperature(Ti);
+    buf.add(prev_energy, prev_magnetization);
     
 
     for (int step = 0; step < n_steps; step++) {
@@ -126,7 +130,7 @@ int main(int argc, char **argv) {
 
             if (peer != MPI_PROC_NULL) {
                 // printf("Entered exchange\n");
-                Message msgTo(config, prev_energy, Ti);
+                Message msgTo(config, prev_energy, Ti, prev_magnetization);
                 Message msgFrom;
 
                 MPI_Sendrecv(&msgTo, 1, msg_type, peer, tag,
@@ -153,7 +157,7 @@ int main(int argc, char **argv) {
             }
             tag++;
             swap++;
-            buf.add(prev_energy);
+            buf.add(prev_energy, prev_magnetization);
             continue;
         }
 
@@ -163,20 +167,26 @@ int main(int argc, char **argv) {
         int j = temp % L;
         config[i][j] *= -1;
 
-        double new_energy = calculateConfigEnergy(config, J);
+        observables = calculateObservables(config, J);
+        double new_energy = observables.first;
+        double new_magnetization = observables.second;
         double delta_energy = new_energy - prev_energy;
 
         if (delta_energy < 0.0) {
             prev_energy = new_energy;
+            prev_magnetization = new_magnetization;
         }
         else {
             double u = uniform_continuous(gen);
-            if (u < exp(-delta_energy / (kB * Ti)))
+            if (u < exp(-delta_energy / (kB * Ti))) {
                 prev_energy = new_energy;
-            else
+                prev_magnetization = new_magnetization;
+            }
+            else {
                 config[i][j] *= -1;
+            }
         }
-        buf.add(prev_energy);    
+        buf.add(prev_energy, prev_magnetization);    
         
     }
 
@@ -207,8 +217,9 @@ void computeAcceptanceRates(int * global_acceptances, const int &size) {
 }
 
 
-double calculateConfigEnergy(int config [L][L], double J[L*L][L*L]) {
-    double e = 0.0;
+pair<double, double> calculateObservables(int config [L][L], double J[L*L][L*L]) {
+    double e = 0.0; // energy
+    double m = 0.0; // magnetization per spin
     for (int i = 0; i < L; i++) {
         for (int j = 0; j < L; j++) {
             int spin = config[i][j];
@@ -218,17 +229,19 @@ double calculateConfigEnergy(int config [L][L], double J[L*L][L*L]) {
             if (j > 0) { // una columna que no es la primera
                 e = e + J[i][j-1] * spin * config[i][j-1];
             }
+            m += spin;
         }
     }
-    return e;
+    m /= (L*L);
+    return {e, m};
 }
 
 MPI_Datatype createMessageType() {
     MPI_Datatype message_type;
 
-    const int count = 3;  // Now three fields
-    int block_lengths[count] = { L * L, 1, 1 };
-    MPI_Datatype types[count] = { MPI_INT, MPI_DOUBLE, MPI_DOUBLE };
+    const int count = 4;  // Now three fields
+    int block_lengths[count] = { L * L, 1, 1, 1 };
+    MPI_Datatype types[count] = { MPI_INT, MPI_DOUBLE, MPI_DOUBLE, MPI_DOUBLE };
 
     MPI_Aint displacements[count];
     Message dummy;
@@ -238,6 +251,7 @@ MPI_Datatype createMessageType() {
     MPI_Get_address(&dummy.config, &displacements[0]);
     MPI_Get_address(&dummy.energy, &displacements[1]);
     MPI_Get_address(&dummy.temperature, &displacements[2]);
+    MPI_Get_address(&dummy.magnetization, &displacements[3]);
 
     for (int i = 0; i < count; i++) {
         displacements[i] -= base_address;
