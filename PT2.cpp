@@ -359,9 +359,9 @@ int main (int argc, char ** argv) {
     double J[L*L][L*L];
     double Ti = calculateTemperatureWithGeometricSpacing(rank, size);
     printf("Temperature at rank %i: %.4f\n", rank, Ti);
-    string filename1 = "observables/observables_" + to_string(rank) + "_1.txt";
-    string filename2 = "observables/observables_" + to_string(rank) + "_2.txt";
-    string overlap_filename = "overlaps/overlaps_" + to_string(rank) + ".txt";
+    string filename1 = "observables2D/observables_" + to_string(rank) + "_1.txt";
+    string filename2 = "observables2D/observables_" + to_string(rank) + "_2.txt";
+    string overlap_filename = "overlaps2D/overlaps_" + to_string(rank) + ".txt";
     Buffer buf1(filename1, buffer_size);
     Buffer buf2(filename2, buffer_size);
     OverlapWriter overlapWriter(overlap_filename, buffer_size);
