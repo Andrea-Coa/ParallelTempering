@@ -1,5 +1,17 @@
 # Parallel Tempering
 
+### Estructura
+
+Parallel Tempering:
+
+- ```PT2.cpp```: Parallel Tempering con 2 réplicas por temperatura en 2D.
+- ```3D_PT2.cpp```: Parallel Tempering con 2 réplicas por temperatura en 3D.
+
+Resultados:
+
+- ```analysis.ipynb```: Análisis de PT en 2D.
+- ```analysis3D.ipynb```: Análisis de PT en 3D.
+
 ### Setup con Windows
 
 1. Instalar Visual Studio, ya que usaremos el compilador MSVC.
